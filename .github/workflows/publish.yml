@@ -1,0 +1,68 @@
+# ニュースを定期的に取得して、GitHub Pages に公開する
+# - 30分ごと(毎時17分と47分)に自動実行
+# - コードを更新(push)したときにも実行
+# - GitHub の Actions 画面から手動でも実行できる(Run workflow ボタン)
+name: Update news and publish
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 長期間放置で定期実行が止まらないようにするための空コミット用
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install libraries
+        run: pip install -r requirements.txt
+
+      - name: Fetch news and build pages
+        run: python build.py
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      # 公開リポジトリは60日間更新がないと定期実行が自動停止するため、
+      # 最後の更新から50日たったら空のコミットを入れて止まらないようにする
+      - name: Keep schedule alive
+        if: github.event_name == 'schedule'
+        run: |
+          last=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          if [ $((now - last)) -gt $((50 * 86400)) ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "Keep scheduled updates alive"
+            git push
+          fi
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
