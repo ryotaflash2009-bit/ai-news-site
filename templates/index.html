@@ -177,8 +177,17 @@
       border: 1px dashed var(--border-strong); border-radius: var(--radius);
       color: var(--muted);
     }
-    .errors { color: var(--muted); font-size: 0.8rem; margin-top: 20px; }
-    .errors ul { margin: 4px 0 0; padding-left: 20px; }
+    /* ---- 取得できなかった・古い内容のお知らせ ---- */
+    .notice {
+      padding: 12px 16px; margin-bottom: 16px;
+      border: 1px solid rgba(232, 176, 74, 0.45);
+      border-radius: var(--radius);
+      background: rgba(232, 176, 74, 0.08);
+      color: #f0cf8e;
+      font-size: 0.88rem; line-height: 1.7;
+    }
+    .notice[hidden] { display: none; }
+    .notice strong { color: #f6dca8; }
 
     /* ---- フッター ---- */
     .site-footer {
@@ -243,8 +252,21 @@
 
       <div class="list-head">
         <h1 class="list-title"><span class="accent">{{ service.label }}</span> の最新ニュース</h1>
-        <span class="list-meta">{{ items|length }}件 ・ 新しい順 ・ 取得 {{ fetched_at|jst }}</span>
+        <span class="list-meta">{{ items|length }}件 ・ 新しい順 ・
+          {% if stale and items %}最終取得 {{ last_success|jst }}{% elif stale %}取得失敗 {{ fetched_at|jst }}{% else %}取得 {{ fetched_at|jst }}{% endif %}</span>
       </div>
+
+      {% if stale and items %}
+      <p class="notice" role="alert"><strong>最新のニュースを取得できませんでした。</strong>
+        下の一覧は、最後に取得できた {{ last_success|jst }} 時点の内容です。最新の情報ではありません。</p>
+      {% elif stale %}
+      <p class="notice" role="alert"><strong>すべての取得先からニュースを取得できませんでした：</strong>{{ errors|join("、") }}。</p>
+      {% elif errors %}
+      <p class="notice" role="alert"><strong>一部の取得先からニュースを取得できませんでした：</strong>{{ errors|join("、") }}。
+        下の一覧には、取得できた取得先のニュースだけを表示しています。</p>
+      {% endif %}
+      {# 公開版はこのページを作った時刻のまま保存されるので、自動更新が止まっていないかをブラウザ側でも確かめる #}
+      <p class="notice" id="age-notice" role="alert" hidden data-ts="{{ (last_success or fetched_at)|iso }}"></p>
 
       {% if items %}
       <ul class="news">
@@ -252,8 +274,14 @@
         <li class="card">
           <div class="meta">
             <span class="badge badge-{{ item.source|source_kind }}">{{ item.source }}</span>
+            {% if item.date_only %}
+            {# 発表元が日付しか出していない記事は、時刻をでっち上げず日付だけを表示する #}
+            <span class="ago" data-ts="{{ item.published|iso }}" data-date-only="1"></span>
+            <time class="date" datetime="{{ item.published.strftime('%Y-%m-%d') }}">{{ item.published|jst_date }}</time>
+            {% else %}
             <span class="ago" data-ts="{{ item.published|iso }}"></span>
             <time class="date" datetime="{{ item.published|iso }}">{{ item.published|jst }}</time>
+            {% endif %}
           </div>
           <h2 class="card-title"><a href="{{ item.link }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a></h2>
           {% if item.summary %}<p class="summary">{{ item.summary }}</p>{% endif %}
@@ -263,14 +291,10 @@
         </li>
         {% endfor %}
       </ul>
+      {% elif stale %}
+      <p class="empty">ニュースを取得できませんでした。しばらくしてから、ページを再読み込みしてください。</p>
       {% else %}
-      <p class="empty">ニュースを取得できませんでした。インターネット接続を確認して、ページを再読み込みしてください。</p>
-      {% endif %}
-
-      {% if errors %}
-      <div class="errors">一部の取得先でエラーがありました：
-        <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
-      </div>
+      <p class="empty">いま表示できる {{ service.label }} のニュースはありません。</p>
       {% endif %}
     </div>
   </main>
@@ -324,10 +348,28 @@
         if (mo < 12) return mo + "か月前";
         return Math.floor(d / 365) + "年前";
       }
+      // 日付しか分からない記事は「今日 / 何日前」だけを出す（日本時間の日付で数える）
+      function daysAgo(ts) {
+        var day = 86400000, jst = 9 * 3600000;
+        var d = Math.floor((Date.now() + jst) / day) - Math.floor(new Date(ts).getTime() / day);
+        if (isNaN(d)) return "";
+        return d <= 0 ? "今日" : d + "日前";
+      }
+      // ページの内容が古くなっていたら（自動更新が止まっているなど）、そのことを表示する
+      var STALE_MINUTES = 120;
+      function checkAge() {
+        var el = document.getElementById("age-notice");
+        var diff = (Date.now() - new Date(el.dataset.ts).getTime()) / 60000;
+        if (isNaN(diff) || diff < STALE_MINUTES) { el.hidden = true; return; }
+        el.innerHTML = "<strong>このページの内容は " + ago(el.dataset.ts) + "に取得したものです。</strong>" +
+          "自動更新が止まっている可能性があり、最新の情報ではないかもしれません。";
+        el.hidden = false;
+      }
       function updateAgo() {
         document.querySelectorAll(".ago[data-ts]").forEach(function (el) {
-          if (el.dataset.ts) el.textContent = ago(el.dataset.ts);
+          if (el.dataset.ts) el.textContent = el.dataset.dateOnly ? daysAgo(el.dataset.ts) : ago(el.dataset.ts);
         });
+        checkAge();
       }
       updateAgo();
       setInterval(updateAgo, 60000);
