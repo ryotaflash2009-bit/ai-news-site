@@ -66,3 +66,17 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      # Vercel 版も最新ニュースで作り直す(コードの push 時は Vercel が自動で作り直すので、定期実行・手動実行のときだけ)
+      # VERCEL_DEPLOY_HOOK(リポジトリの Secrets)が未登録なら何もしない
+      - name: Refresh Vercel site
+        if: github.event_name != 'push'
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -n "$VERCEL_DEPLOY_HOOK" ]; then
+            curl -fsS -X POST "$VERCEL_DEPLOY_HOOK" > /dev/null
+            echo "Vercel の再公開を依頼しました"
+          else
+            echo "VERCEL_DEPLOY_HOOK が未登録のため、Vercel の再公開はスキップします"
+          fi
