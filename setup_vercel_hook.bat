@@ -8,7 +8,7 @@ echo ============================================================
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$out = npx --yes vercel@65.9.0 deploy-hooks create github-actions-30min --ref main 2>&1 | Out-String;" ^
-  "$m = [regex]::Match($out, 'https://api\.vercel\.com/\S+');" ^
+  "$m = [regex]::Match($out, 'https://api\.vercel\.com/[^\s,\x22]+');" ^
   "if (-not $m.Success) { Write-Host $out; Write-Host 'Failed to create deploy hook.'; exit 1 }" ^
   "$m.Value | gh secret set VERCEL_DEPLOY_HOOK; if ($LASTEXITCODE -ne 0) { exit 1 }" ^
   "Write-Host 'Saved VERCEL_DEPLOY_HOOK to GitHub Secrets.'"
