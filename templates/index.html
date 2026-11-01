@@ -17,8 +17,10 @@
       --text: #eceae7;
       --text-sub: #c3c7cc;
       --muted: #8e97a1;
-      --accent: #e0835f;
-      --accent-strong: #ec9677;
+      /* アクセント色は開いているサービスのイメージカラー(app.py の SERVICES の color) */
+      --accent: {{ service.color }};
+      --accent-strong: {{ service.color_strong }};
+      --on-accent: #101215;  /* アクセント色の上に載せる文字色 */
       --radius: 14px;
     }
     * { box-sizing: border-box; }
@@ -86,10 +88,10 @@
     .tab.active {
       background: var(--accent);
       border-color: var(--accent);
-      color: #16100c;
-      box-shadow: 0 4px 14px rgba(224, 131, 95, 0.28);
+      color: var(--on-accent);
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent);
     }
-    .tab.active .tab-company { color: rgba(22, 16, 12, 0.72); }
+    .tab.active .tab-company { color: color-mix(in srgb, var(--on-accent) 72%, transparent); }
 
     /* ---- 一覧の見出し ---- */
     main { padding: 24px 0 8px; min-height: 60vh; }
@@ -160,14 +162,14 @@
       display: inline-flex; align-items: center; gap: 6px;
       min-height: 38px;
       padding: 7px 14px;
-      border: 1px solid rgba(224, 131, 95, 0.45);
+      border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
       border-radius: 10px;
       color: var(--accent-strong);
       text-decoration: none;
       font-size: 0.85rem; font-weight: 600;
       transition: background 0.15s, color 0.15s, border-color 0.15s;
     }
-    .read-btn:hover { background: var(--accent); border-color: var(--accent); color: #16100c; }
+    .read-btn:hover { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
     .read-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     .empty {

@@ -30,6 +30,8 @@ SERVICES = {
     "claude": {
         "label": "Claude",
         "company": "Anthropic",
+        "color": "#e0835f",          # タブ・見出し・ボタンのイメージカラー(暗い背景で見やすい明るさ)
+        "color_strong": "#ec9677",   # 文字色・ホバー用の少し明るい色
         "feeds": [
             {
                 # anthropic.com は公式RSSを出していないため、公式ニュースページをRSS化した公開ミラーを使用
@@ -45,6 +47,8 @@ SERVICES = {
     "chatgpt": {
         "label": "ChatGPT",
         "company": "OpenAI",
+        "color": "#2bbf97",          # タブ・見出し・ボタンのイメージカラー(暗い背景で見やすい明るさ)
+        "color_strong": "#5ad6b3",   # 文字色・ホバー用の少し明るい色
         "feeds": [
             {"name": "OpenAI公式", "url": "https://openai.com/news/rss.xml", "limit": 20},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/openai/feed/", "limit": 20},
@@ -55,6 +59,8 @@ SERVICES = {
     "gemini": {
         "label": "Gemini",
         "company": "Google",
+        "color": "#5b95f7",          # タブ・見出し・ボタンのイメージカラー(暗い背景で見やすい明るさ)
+        "color_strong": "#86b1ff",   # 文字色・ホバー用の少し明るい色
         "feeds": [
             {"name": "Google公式ブログ", "url": "https://blog.google/technology/ai/rss/", "limit": 20,
              "keywords": ["Gemini"]},
@@ -67,6 +73,8 @@ SERVICES = {
     "grok": {
         "label": "Grok",
         "company": "xAI",
+        "color": "#d5d9df",          # タブ・見出し・ボタンのイメージカラー(暗い背景で見やすい明るさ)
+        "color_strong": "#f2f4f6",   # 文字色・ホバー用の少し明るい色
         "feeds": [
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/xai/feed/", "limit": 20},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/grok/feed/", "limit": 20},
@@ -76,6 +84,8 @@ SERVICES = {
     "deepseek": {
         "label": "DeepSeek",
         "company": "DeepSeek",
+        "color": "#8e8cff",          # タブ・見出し・ボタンのイメージカラー(暗い背景で見やすい明るさ)
+        "color_strong": "#aeacff",   # 文字色・ホバー用の少し明るい色
         "feeds": [
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/deepseek/feed/", "limit": 20},
             {"name": "Googleニュース", "url": google_news("DeepSeek"), "limit": 30},
@@ -84,6 +94,8 @@ SERVICES = {
     "copilot": {
         "label": "Copilot",
         "company": "Microsoft",
+        "color": "#2ec4e6",          # タブ・見出し・ボタンのイメージカラー(暗い背景で見やすい明るさ)
+        "color_strong": "#67d8f1",   # 文字色・ホバー用の少し明るい色
         "feeds": [
             {"name": "Microsoft公式ブログ", "url": "https://blogs.microsoft.com/feed/", "limit": 20,
              "keywords": ["Copilot"]},
