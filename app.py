@@ -5,6 +5,7 @@
 
 import difflib
 import html
+import json
 import logging
 import re
 import socket
@@ -38,6 +39,22 @@ def word(pattern):
 # "exclude" : これを含む記事は、同じ名前の別物(人名・星座・暗号資産など)とみなして載せない
 # "official": True の取得先(そのサービスの会社自身の公式ニュース)は、すべてそのサービスの話題なので "match" で絞らない
 #             (Google・Microsoft の公式ブログは会社全体の話題が流れてくるので、"match" で絞る)
+# "parser"  : RSSを出していない公式サイトは、ニュース一覧ページを直接読み取る(PAGE_PARSERS を参照)
+# "max_silence_days": 最新の記事がこの日数より古ければ「更新が止まっている」として取得失敗扱いにする
+# "title_only": True の取得先(AI全般を扱うメディア)は、タイトルにサービス名がある記事だけを載せる
+#               (いろいろな会社の話題がまとめて流れてくるので、概要に名前が出るだけの記事は載せない)
+
+# AI全般を扱う信頼できるメディア。すべてのタブで使い、タイトルにそのサービス名がある記事だけを拾う
+AI_MEDIA = [
+    {"name": "TechCrunch", "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "limit": 20, "title_only": True},
+    {"name": "The Verge", "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml", "limit": 20, "title_only": True},
+    {"name": "Ars Technica", "url": "https://arstechnica.com/ai/feed/", "limit": 20, "title_only": True},
+    {"name": "WIRED", "url": "https://www.wired.com/feed/tag/ai/latest/rss", "limit": 20, "title_only": True},
+    {"name": "The Decoder", "url": "https://the-decoder.com/feed/", "limit": 20, "title_only": True},
+    {"name": "ITmedia AI+", "url": "https://rss.itmedia.co.jp/rss/2.0/aiplus.xml", "limit": 20, "title_only": True},
+    {"name": "PC Watch", "url": "https://pc.watch.impress.co.jp/data/rss/1.0/pcw/feed.rdf", "limit": 20, "title_only": True},
+]
+
 SERVICES = {
     "claude": {
         "label": "Claude",
@@ -47,15 +64,23 @@ SERVICES = {
         "match": re.compile(rf"anthropic|{word('claude')}|クロード|アンソロピック|アンスロピック", re.I),
         "exclude": re.compile(r"monet|debussy|van damme|makelele|モネ|ドビュッシー|ヴァン・?ダム|ジャン[=＝・]クロード", re.I),
         "feeds": [
+            # anthropic.com は公式RSSを出していないため、公式のニュース・研究ページを直接読み取る
+            {"name": "Anthropic公式", "url": "https://www.anthropic.com/news", "limit": 20, "official": True,
+             "parser": "anthropic", "max_silence_days": 21},
+            {"name": "Anthropic公式（研究）", "url": "https://www.anthropic.com/research", "limit": 20,
+             "official": True, "parser": "anthropic"},
             {
-                # anthropic.com は公式RSSを出していないため、公式ニュースページをRSS化した公開ミラーを使用
-                "name": "Anthropic公式",
+                # 予備: 公式ニュースページをRSS化した有志の公開ミラー(公式ページの読み取りが壊れたときの保険)。
+                # 更新が止まっても気づけるよう、最新記事が古すぎるときは取得失敗として表示する
+                "name": "Anthropic公式（ミラー）",
                 "url": "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml",
                 "limit": 20,
                 "official": True,
+                "max_silence_days": 14,
             },
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/anthropic/feed/", "limit": 20},
             {"name": "The Verge", "url": "https://www.theverge.com/rss/anthropic/index.xml", "limit": 20},
+            *AI_MEDIA,
             {"name": "Googleニュース", "url": google_news("Anthropic OR Claude AI"), "limit": 30},
         ],
     },
@@ -67,9 +92,11 @@ SERVICES = {
         "match": re.compile(rf"openai|chatgpt|{word('gpt')}|gpt-?\d|{word('sora')}|{word('codex')}|altman|"
                             r"オープンAI|アルトマン", re.I),
         "feeds": [
-            {"name": "OpenAI公式", "url": "https://openai.com/news/rss.xml", "limit": 20, "official": True},
+            {"name": "OpenAI公式", "url": "https://openai.com/news/rss.xml", "limit": 20, "official": True,
+             "max_silence_days": 14},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/openai/feed/", "limit": 20},
             {"name": "The Verge", "url": "https://www.theverge.com/rss/openai/index.xml", "limit": 20},
+            *AI_MEDIA,
             {"name": "Googleニュース", "url": google_news("OpenAI OR ChatGPT"), "limit": 30},
         ],
     },
@@ -84,9 +111,15 @@ SERVICES = {
                               r"gemini (exchange|trust|earn|dollar|space)|"
                               r"horoscope|zodiac|双子座|ふたご座|星座|占い|nasa", re.I),
         "feeds": [
+            # Gemini 専用の公式ブログ(すべて Gemini の話題)
+            {"name": "Gemini公式ブログ", "url": "https://blog.google/products/gemini/rss/", "limit": 20,
+             "official": True, "max_silence_days": 30},
             {"name": "Google公式ブログ", "url": "https://blog.google/technology/ai/rss/", "limit": 20},
+            {"name": "Google DeepMind公式ブログ", "url": "https://deepmind.google/blog/rss.xml", "limit": 20,
+             "title_only": True},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/gemini/feed/", "limit": 20},
             {"name": "The Verge", "url": "https://www.theverge.com/rss/google/index.xml", "limit": 20},
+            *AI_MEDIA,
             {"name": "Googleニュース", "url": google_news('"Gemini" Google AI'), "limit": 30},
         ],
     },
@@ -98,8 +131,12 @@ SERVICES = {
         # 「xAI」は大文字小文字まで一致させる(説明可能なAIの略語「XAI」と区別するため)
         "match": re.compile(rf"(?i:grok|グロック|spacex ?ai|spacex ?si|スペースX ?AI|スペースX ?SI)|{word('xAI')}"),
         "feeds": [
+            # x.ai は公式RSSを出していないため、公式ニュースページを直接読み取る
+            {"name": "xAI公式", "url": "https://x.ai/news", "limit": 20, "official": True, "parser": "xai",
+             "max_silence_days": 30},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/xai/feed/", "limit": 20},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/grok/feed/", "limit": 20},
+            *AI_MEDIA,
             {"name": "Googleニュース", "url": google_news("xAI OR Grok"), "limit": 30},
         ],
     },
@@ -110,7 +147,12 @@ SERVICES = {
         "color_strong": "#aeacff",   # 文字色・ホバー用の少し明るい色
         "match": re.compile(r"deepseek|ディープシーク|深度求索", re.I),
         "feeds": [
+            # DeepSeek は公式RSSを出していないため、公式APIドキュメントの「News」一覧(リリース名と日付)を読み取る。
+            # 発表の間隔が数か月あくこともあるので、更新停止の判定はしない
+            {"name": "DeepSeek公式", "url": "https://api-docs.deepseek.com/news/news250120", "limit": 20,
+             "official": True, "parser": "deepseek"},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/deepseek/feed/", "limit": 20},
+            *AI_MEDIA,
             {"name": "Googleニュース", "url": google_news("DeepSeek"), "limit": 30},
         ],
     },
@@ -121,10 +163,20 @@ SERVICES = {
         "color_strong": "#67d8f1",   # 文字色・ホバー用の少し明るい色
         "match": re.compile(r"copilot|コパイロット", re.I),
         "feeds": [
+            # Copilot 専用の公式RSSはないため、Microsoft の各公式フィードから Copilot の記事を拾う
             {"name": "Microsoft公式ブログ", "url": "https://blogs.microsoft.com/feed/", "limit": 20},
+            {"name": "Microsoft公式ニュース", "url": "https://news.microsoft.com/source/feed/", "limit": 20,
+             "title_only": True},
+            {"name": "Microsoft 365公式ブログ", "url": "https://www.microsoft.com/en-us/microsoft-365/blog/feed/", "limit": 20,
+             "title_only": True},
+            {"name": "Windows公式ブログ", "url": "https://blogs.windows.com/feed/", "limit": 20,
+             "title_only": True},
+            {"name": "GitHub公式チェンジログ", "url": "https://github.blog/changelog/feed/", "limit": 20,
+             "title_only": True},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/microsoft-copilot/feed/", "limit": 20},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/copilot/feed/", "limit": 20},
             {"name": "The Verge", "url": "https://www.theverge.com/rss/microsoft/index.xml", "limit": 20},
+            *AI_MEDIA,
             {"name": "Googleニュース", "url": google_news('"Copilot" Microsoft'), "limit": 30},
         ],
     },
@@ -133,7 +185,7 @@ DEFAULT_SERVICE = "claude"
 
 SUMMARY_MAX_CHARS = 140    # 要約(抜粋)の最大文字数。全文転載しないよう短く切る
 MATCH_TEXT_CHARS = 300     # 関連性の判定に使う概要の文字数(タイトル + 概要の冒頭)
-MAX_ITEMS = 80             # ページに表示する最大件数
+MAX_ITEMS = 100            # ページに表示する最大件数
 MAX_AGE_DAYS = 180         # これより古い記事は「最新ニュース」として載せない
 FUTURE_TOLERANCE = timedelta(hours=1)  # 公開日時が今より1時間以上先の記事は、日時が壊れているとみなす
 CACHE_SECONDS = 300        # 取得結果をサービスごとに5分だけ使い回す(短時間の連続更新で相手サイトに負担をかけないため)
@@ -142,6 +194,12 @@ TIMEOUT_SECONDS = 10
 USER_AGENT = "Mozilla/5.0 (ai-news-site; RSS reader)"
 # 取得先ごとの優先度(重複した記事はこの順で残す): 公式 > 専門メディア > Googleニュース
 SOURCE_PRIORITY = {"official": 0, "media": 1, "google": 2}
+# Googleニュースに混ざる、報道機関ではない掲載元(個人ブログ・SNS・動画・自動生成の記事まとめ・宣伝ページ、
+# 乗っ取られた公共機関サイトのスパムなど)。これらの記事は載せない
+UNRELIABLE_PUBLISHERS = re.compile(
+    r"^(YouTube|X|note|Pasquale Pillitteri|BigGo ファイナンス|mbp-japan\.com|ホリエモンAI学校|OrcaRouter|"
+    r"TIKR\.com|Yellow\.com)$"
+    r"|Müdürlüğü|Belediyesi|Valiliği|Üniversitesi")
 # ---------------------------------------------------------------------
 
 app = Flask(__name__)
@@ -218,21 +276,123 @@ def source_type(feed):
     return "media"
 
 
-def fetch_feed(feed, service):
-    """1つのフィードを取得して、(表示用の辞書のリスト, 除外した件数) を返す。"""
-    req = urllib.request.Request(feed["url"], headers={"User-Agent": USER_AGENT})
+# ---- RSSを出していない公式サイトのニュース一覧ページを読み取る ----------------
+# どれも「タイトル・URL・日付(・要約)」だけを取り出す。日付は発表元の日付のみ(時刻なし)なので 00:00 UTC として扱う
+
+def _date_tuple(y, m, d):
+    return (int(y), int(m), int(d), 0, 0, 0)
+
+
+MONTHS = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+
+
+NEXT_DATA = re.compile(r'self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)')
+
+
+def parse_anthropic(page, url):
+    """anthropic.com/news・/research: ページに埋め込まれた記事データ(タイトル・公開日・要約・URL)を読む。
+    データはJSONとして正しく読み解く(記事の中にある分類名・チーム名の "title" を記事名と取り違えないため)。"""
+    data = "".join(json.loads(s) for s in NEXT_DATA.findall(page))
+    decoder = json.JSONDecoder()
+    articles = {}
+    for m in re.finditer(r'\{"_id":"[^"]+","_type":"article"', data):
+        try:
+            article, _ = decoder.raw_decode(data, m.start())
+        except ValueError:
+            continue
+        slug = (article.get("slug") or {}).get("current")
+        title = (article.get("title") or "").strip()
+        date = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", article.get("publishedOn") or "")
+        if not (title and slug and date) or slug in articles:
+            continue
+        linked = article.get("linkedUrl")
+        path = linked if linked and linked.startswith(("/", "http")) else \
+            ("/research/" if article.get("articleType") == "research" else "/news/") + slug
+        articles[slug] = {"title": title, "link": urllib.parse.urljoin(url, path),
+                          "summary": article.get("summary") or "", "published_parsed": _date_tuple(*date.groups())}
+    return list(articles.values())
+
+
+def parse_xai(page, url):
+    """x.ai/news: 記事カード(<a href="/news/..."> の中の見出し・説明・日付)を読む。"""
+    articles = {}
+    for m in re.finditer(r'<a[^>]+href="(/news/[a-z0-9-]+)"[^>]*>(.*?)</a>', page, re.S):
+        title = re.search(r"<h[1-4][^>]*>(.*?)</h[1-4]>", m[2], re.S)
+        date = re.search(r">\s*([A-Z][a-z]{2})[a-z]* (\d{1,2}), (\d{4})\s*<", m[2])
+        if not (title and date) or m[1] in articles or date[1].lower() not in MONTHS:
+            continue
+        # 説明文(日付だけが入った <p> は説明ではないので使わない)
+        summaries = [clean_text(p) for p in re.findall(r"<p[^>]*>(.*?)</p>", m[2], re.S)]
+        summaries = [s for s in summaries if s and not re.fullmatch(r"[A-Z][a-z]+ \d{1,2}, \d{4}", s)]
+        articles[m[1]] = {"title": clean_text(title[1]), "link": urllib.parse.urljoin(url, m[1]),
+                          "summary": summaries[0] if summaries else "",
+                          "published_parsed": _date_tuple(date[3], MONTHS[date[1].lower()], date[2])}
+    return list(articles.values())
+
+
+def parse_deepseek(page, url):
+    """api-docs.deepseek.com: 「News」一覧(「DeepSeek-V4 Preview Release 2026/04/24」の形)を読む。"""
+    articles = {}
+    for m in re.finditer(r'<a[^>]+href="(/news/news\d+)"[^>]*>(.*?)</a>', page, re.S):
+        text = clean_text(m[2])
+        date = re.fullmatch(r"(.+?)\s+(\d{4})/(\d{2})/(\d{2})", text)
+        if date and m[1] not in articles:
+            articles[m[1]] = {"title": date[1], "link": urllib.parse.urljoin(url, m[1]), "summary": "",
+                              "published_parsed": _date_tuple(*date.groups()[1:])}
+    return list(articles.values())
+
+
+PAGE_PARSERS = {"anthropic": parse_anthropic, "xai": parse_xai, "deepseek": parse_deepseek}
+MIN_PAGE_ARTICLES = 3   # ページから読み取れた記事がこれより少なければ、ページの形式が変わったとみなす
+
+# 同じURLを短時間に何度も取りに行かない(すべてのタブで使うメディアのフィードを、タブの数だけ取得しないため)
+RAW_CACHE_SECONDS = 120
+_raw_cache = {}
+
+
+def download(url):
+    cached = _raw_cache.get(url)
+    if cached and time.time() - cached[0] < RAW_CACHE_SECONDS:
+        return cached[1]
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as res:
         data = res.read()
-    parsed = feedparser.parse(data)
-    if not parsed.entries:
-        # エラーページ(HTML)が返ってきた場合なども、成功扱いにせず失敗として記録する
-        raise FeedError("記事を読み取れませんでした" + ("(RSSの形式が不正)" if parsed.bozo else "(0件)"))
+    _raw_cache[url] = (time.time(), data)
+    return data
 
+
+def read_entries(feed):
+    """取得先から記事の一覧を読む。読めないとき・更新が止まっているときは FeedError。"""
+    data = download(feed["url"])
+    if feed.get("parser"):
+        entries = PAGE_PARSERS[feed["parser"]](data.decode("utf-8", "replace"), feed["url"])
+        if len(entries) < MIN_PAGE_ARTICLES:
+            raise FeedError("ページの形式が変わり、記事を読み取れませんでした")
+    else:
+        parsed = feedparser.parse(data)
+        entries = parsed.entries
+        if not entries:
+            # エラーページ(HTML)が返ってきた場合なども、成功扱いにせず失敗として記録する
+            raise FeedError("記事を読み取れませんでした" + ("(RSSの形式が不正)" if parsed.bozo else "(0件)"))
+    if feed.get("max_silence_days"):
+        # 取得できても、最新の記事が古すぎるなら更新が止まっている(ミラーの停止など)とみなし、黙って古いままにしない
+        dates = [d for d in map(entry_datetime, entries) if d]
+        days = (datetime.now(timezone.utc) - max(dates)).days if dates else None
+        if days is None or days > feed["max_silence_days"]:
+            raise FeedError(f"最新の記事が{days}日前のまま更新されていません（更新停止の可能性）"
+                            if days is not None else "日付のある記事がありません")
+    return entries
+
+
+def fetch_feed(feed, service):
+    """1つのフィードを取得して、(表示用の辞書のリスト, 除外した件数) を返す。"""
+    entries = read_entries(feed)
     kind = source_type(feed)
-    dropped = {"日付なし・不正": 0, "古い": 0, "無関係": 0}
+    dropped = {"日付なし・不正": 0, "古い": 0, "無関係": 0, "信頼できない掲載元": 0}
     oldest = datetime.now(timezone.utc) - timedelta(days=MAX_AGE_DAYS)
     items = []
-    for entry in parsed.entries:
+    for entry in entries:
         title = html.unescape(entry.get("title", "")).strip()
         link = entry.get("link", "")
         if not title or not link:
@@ -245,12 +405,16 @@ def fetch_feed(feed, service):
             dropped["古い"] += 1
             continue
         publisher = (entry.get("source") or {}).get("title")
+        if publisher and UNRELIABLE_PUBLISHERS.search(publisher.strip()):
+            dropped["信頼できない掲載元"] += 1
+            continue
         core = core_title(title, publisher)
         text = clean_text(entry.get("summary", ""))
         if not feed.get("official"):
             haystack = core + " " + unicodedata.normalize("NFKC", text[:MATCH_TEXT_CHARS])
             excluded = service.get("exclude") and service["exclude"].search(haystack)
-            if excluded or not service["match"].search(haystack):
+            matched = service["match"].search(core if feed.get("title_only") else haystack)
+            if excluded or not matched:
                 dropped["無関係"] += 1
                 continue
         summary = clean_summary(text)
