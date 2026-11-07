@@ -194,6 +194,8 @@ CACHE_SECONDS = 300        # 取得結果をサービスごとに5分だけ使�
 RETRY_SECONDS = 60         # 取得に失敗した取得先があったときは、1分たてば取り直す
 TIMEOUT_SECONDS = 10
 USER_AGENT = "Mozilla/5.0 (ai-news-site; RSS reader)"
+# サイトの正式なURL(人に教える・検索エンジンに伝えるURL)
+SITE_URL = "https://ai-news-hub-app.vercel.app/"
 # 前回の取得結果(data/タブ名.json)を読みに行く場所(公開中のサイト)。環境変数 NEWS_SNAPSHOT_URL で変えられる
 SNAPSHOT_URL = os.environ.get("NEWS_SNAPSHOT_URL", "https://ai-news-hub-app.vercel.app/data/")
 # 取得先ごとの優先度(重複した記事はこの順で残す): 公式 > 専門メディア > Googleニュース
@@ -642,7 +644,7 @@ def render_page(current, tab_url):
     sources = list(dict.fromkeys(f["name"] for f in SERVICES[current]["feeds"]))
     return render_template("index.html", items=news["items"], errors=news["errors"], stale=news["stale"],
                            sources=sources, services=SERVICES, current=current, service=SERVICES[current],
-                           tab_url=tab_url, fetched_at=utc(news["time"]),
+                           tab_url=tab_url, canonical_url=canonical_url(current), fetched_at=utc(news["time"]),
                            last_success=utc(news["last_success"]), year=datetime.now().year)
 
 
@@ -653,6 +655,11 @@ def page_file(key):
 
 
 PAGE_KEYS = {page_file(k).removesuffix(".html"): k for k in SERVICES}
+
+
+def canonical_url(key):
+    """タブの正式なURL(Vercel 版)。最初のタブはサイトのトップ(/)にする。"""
+    return SITE_URL if key == DEFAULT_SERVICE else SITE_URL + page_file(key)
 
 
 @app.route("/", defaults={"path": ""})

@@ -34,6 +34,17 @@ def save_snapshot(key, news):
     (DIST / "data" / f"{key}.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
+def write_sitemap():
+    """検索エンジン向けに、正式なURL(Vercel 版)のページ一覧(sitemap.xml)と robots.txt を作る。"""
+    urls = "".join(f"<url><loc>{app.canonical_url(key)}</loc><changefreq>hourly</changefreq></url>"
+                   for key in SERVICES)
+    (DIST / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>\n', encoding="utf-8")
+    (DIST / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {app.SITE_URL}sitemap.xml\n",
+                                     encoding="utf-8")
+
+
 def main():
     if DIST.exists():
         shutil.rmtree(DIST)
@@ -57,6 +68,7 @@ def main():
 
     # GitHub Pages に「そのまま公開する」ことを伝える空ファイル
     (DIST / ".nojekyll").write_text("", encoding="utf-8")
+    write_sitemap()
 
     if not fresh:
         # どのタブも1件も取れなかった(ネットワーク障害など)ときは失敗扱いにして、前回の公開内容をそのまま残す

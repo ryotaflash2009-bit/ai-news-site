@@ -330,6 +330,13 @@ class TestPages(TestCase):
         self.assertIn('href="index.html"', html)
         self.assertEqual(self.client.get("/unknown.html").status_code, 404)
 
+    def test_canonical_url_points_to_official_site(self):
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn(f'<link rel="canonical" href="{app.SITE_URL}">', html)
+        html = self.client.get("/grok.html").get_data(as_text=True)
+        self.assertIn(f'<link rel="canonical" href="{app.SITE_URL}grok.html">', html)
+        self.assertIn('<meta property="og:title" content="Grok ニュース | AI News Hub">', html)
+
     def test_cdn_cache_headers_only_on_vercel(self):
         # Vercel のビルド中は VERCEL が最初から設定されているので、ない状態をはっきり作って確かめる
         without = {k: v for k, v in os.environ.items() if k != "VERCEL"}

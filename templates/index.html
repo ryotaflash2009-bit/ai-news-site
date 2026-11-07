@@ -6,6 +6,16 @@
   <title>{{ service.label }} ニュース | AI News Hub</title>
   <meta name="description" content="Claude・ChatGPT・Gemini・Grok・DeepSeek・Copilot など主要AIサービスの最新ニュースを、サービスごとにまとめてチェックできるサイトです。">
   <meta name="theme-color" content="#0e1013">
+  {# 正式なURL(Vercel 版)。GitHub Pages 版と同じ内容が2か所にあることを検索エンジンに伝える #}
+  <link rel="canonical" href="{{ canonical_url }}">
+  {# SNS でリンクを共有したときに表示されるタイトル・説明 #}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="AI News Hub">
+  <meta property="og:title" content="{{ service.label }} ニュース | AI News Hub">
+  <meta property="og:description" content="{{ service.label }}（{{ service.company }}）の最新ニュースを、公式発表と主要メディアからまとめてチェックできます。">
+  <meta property="og:url" content="{{ canonical_url }}">
+  <meta property="og:locale" content="ja_JP">
+  <meta name="twitter:card" content="summary">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23e0835f'/%3E%3Ctext x='16' y='21.5' font-family='Arial,sans-serif' font-size='14' font-weight='700' text-anchor='middle' fill='%230e1013'%3EAI%3C/text%3E%3C/svg%3E">
   <style>
     :root {
