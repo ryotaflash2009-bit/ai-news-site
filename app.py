@@ -4,6 +4,7 @@
 """
 
 import difflib
+import gzip
 import html
 import json
 import logging
@@ -370,6 +371,13 @@ def is_transient(e):
     return isinstance(e, (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError))
 
 
+def decompress(data):
+    """頼んでいなくても gzip 圧縮で送ってくるサーバー(Google DeepMind のブログなど)があるので、圧縮されていれば戻す。"""
+    if data[:2] == b"\x1f\x8b":
+        return gzip.decompress(data)
+    return data
+
+
 def download(url):
     cached = _raw_cache.get(url)
     if cached and time.time() - cached[0] < RAW_CACHE_SECONDS:
@@ -386,6 +394,7 @@ def download(url):
         time.sleep(RETRY_WAIT_SECONDS)
         with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as res:
             data = res.read()
+    data = decompress(data)
     _raw_cache[url] = (time.time(), data)
     return data
 

@@ -274,6 +274,9 @@ class TestFailures(TestCase):
 
         with mock.patch.object(app.urllib.request, "urlopen", urlopen), mock.patch.object(app.time, "sleep"):
             self.assertEqual(app.download("https://retry.test/feed"), b"ok")
+        # 頼んでいないのに gzip 圧縮で届いた中身も読める
+        self.assertEqual(app.decompress(__import__("gzip").compress(b"<rss/>")), b"<rss/>")
+        self.assertEqual(app.decompress(b"<rss/>"), b"<rss/>")
         self.assertEqual(len(calls), 2)
         with mock.patch.object(app.urllib.request, "urlopen",
                                side_effect=urllib.error.HTTPError("u", 404, "nf", None, None)) as m:
