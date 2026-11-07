@@ -34,6 +34,10 @@ jobs:
       - name: Install libraries
         run: pip install -r requirements.txt
 
+      # 正確さのルール(新しい順・重複・関連性・失敗の表示など)が壊れていないかを確かめる。失敗したら公開しない
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
       - name: Fetch news and build pages
         run: python build.py
 

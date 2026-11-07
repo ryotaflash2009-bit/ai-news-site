@@ -2,6 +2,16 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "installCommand": "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
-  "buildCommand": ".venv/bin/python build.py",
-  "outputDirectory": "dist"
+  "buildCommand": ".venv/bin/python -m unittest discover -s tests && .venv/bin/python build.py",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60,
+      "includeFiles": "{app.py,templates/**}"
+    }
+  },
+  "rewrites": [
+    { "source": "/", "destination": "/api/index" },
+    { "source": "/:page(index|chatgpt|gemini|grok|deepseek|copilot).html", "destination": "/api/index?tab=:page" }
+  ]
 }

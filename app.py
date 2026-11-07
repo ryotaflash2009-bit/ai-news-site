@@ -7,6 +7,7 @@ import difflib
 import html
 import json
 import logging
+import os
 import re
 import socket
 import time
@@ -149,7 +150,7 @@ SERVICES = {
         "feeds": [
             # DeepSeek は公式RSSを出していないため、公式APIドキュメントの「News」一覧(リリース名と日付)を読み取る。
             # 発表の間隔が数か月あくこともあるので、更新停止の判定はしない
-            {"name": "DeepSeek公式", "url": "https://api-docs.deepseek.com/news/news250120", "limit": 20,
+            {"name": "DeepSeek公式", "url": "https://api-docs.deepseek.com/", "limit": 20,
              "official": True, "parser": "deepseek"},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/deepseek/feed/", "limit": 20},
             *AI_MEDIA,
@@ -192,6 +193,8 @@ CACHE_SECONDS = 300        # 取得結果をサービスごとに5分だけ使�
 RETRY_SECONDS = 60         # 取得に失敗した取得先があったときは、1分たてば取り直す
 TIMEOUT_SECONDS = 10
 USER_AGENT = "Mozilla/5.0 (ai-news-site; RSS reader)"
+# 前回の取得結果(data/タブ名.json)を読みに行く場所(公開中のサイト)。環境変数 NEWS_SNAPSHOT_URL で変えられる
+SNAPSHOT_URL = os.environ.get("NEWS_SNAPSHOT_URL", "https://ai-news-hub-app.vercel.app/data/")
 # 取得先ごとの優先度(重複した記事はこの順で残す): 公式 > 専門メディア > Googleニュース
 SOURCE_PRIORITY = {"official": 0, "media": 1, "google": 2}
 # Googleニュースに混ざる、報道機関ではない掲載元(個人ブログ・SNS・動画・自動生成の記事まとめ・宣伝ページ、
@@ -331,8 +334,10 @@ def parse_xai(page, url):
     return list(articles.values())
 
 
-def parse_deepseek(page, url):
-    """api-docs.deepseek.com: 「News」一覧(「DeepSeek-V4 Preview Release 2026/04/24」の形)を読む。"""
+def parse_deepseek(page, url, follow=True):
+    """api-docs.deepseek.com: 「News」一覧(「DeepSeek-V4 Preview Release 2026/04/24」の形)を読む。
+    トップページには一覧がないので、メニューの「News」のリンク先(最新のお知らせのページ)をたどって読む
+    (個々のお知らせのページは消えることがあるため、いつもあるトップページから入る)。"""
     articles = {}
     for m in re.finditer(r'<a[^>]+href="(/news/news\d+)"[^>]*>(.*?)</a>', page, re.S):
         text = clean_text(m[2])
@@ -340,6 +345,10 @@ def parse_deepseek(page, url):
         if date and m[1] not in articles:
             articles[m[1]] = {"title": date[1], "link": urllib.parse.urljoin(url, m[1]), "summary": "",
                               "published_parsed": _date_tuple(*date.groups()[1:])}
+    news_link = re.search(r'<a[^>]+href="(/news/news\d+/?)"', page)
+    if not articles and follow and news_link:
+        news_url = urllib.parse.urljoin(url, news_link[1])
+        return parse_deepseek(download(news_url).decode("utf-8", "replace"), news_url, follow=False)
     return list(articles.values())
 
 
@@ -351,13 +360,32 @@ RAW_CACHE_SECONDS = 120
 _raw_cache = {}
 
 
+RETRY_WAIT_SECONDS = 2
+
+
+def is_transient(e):
+    """一時的なエラー(時間切れ・接続失敗・相手サーバーの5xx)かどうか。1回だけ取り直す対象。"""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code >= 500
+    return isinstance(e, (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError))
+
+
 def download(url):
     cached = _raw_cache.get(url)
     if cached and time.time() - cached[0] < RAW_CACHE_SECONDS:
         return cached[1]
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as res:
-        data = res.read()
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as res:
+            data = res.read()
+    except Exception as e:
+        # 一時的な失敗なら少し待って1回だけ取り直す(それでもだめなら、これまで通り取得失敗として表示する)
+        if not is_transient(e):
+            raise
+        log.info("一時的なエラーのため取り直します: %s → %r", url, e)
+        time.sleep(RETRY_WAIT_SECONDS)
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as res:
+            data = res.read()
     _raw_cache[url] = (time.time(), data)
     return data
 
@@ -389,13 +417,17 @@ def fetch_feed(feed, service):
     """1つのフィードを取得して、(表示用の辞書のリスト, 除外した件数) を返す。"""
     entries = read_entries(feed)
     kind = source_type(feed)
-    dropped = {"日付なし・不正": 0, "古い": 0, "無関係": 0, "信頼できない掲載元": 0}
+    dropped = {"日付なし・不正": 0, "古い": 0, "無関係": 0, "信頼できない掲載元": 0, "リンク不正": 0}
     oldest = datetime.now(timezone.utc) - timedelta(days=MAX_AGE_DAYS)
     items = []
     for entry in entries:
         title = html.unescape(entry.get("title", "")).strip()
-        link = entry.get("link", "")
+        link = entry.get("link", "").strip()
         if not title or not link:
+            continue
+        if not link.lower().startswith(("https://", "http://")):
+            # javascript: など、普通のWebページ以外へのリンクは載せない(安全のため)
+            dropped["リンク不正"] += 1
             continue
         published = entry_datetime(entry)
         if published is None:
@@ -486,6 +518,18 @@ def dedupe(items):
     return kept, merged
 
 
+def load_snapshot(key):
+    """公開中のサイトに保存してある、前回取得できたニュース(data/タブ名.json)を読む(読めなければ None)。"""
+    try:
+        data = json.loads(download(SNAPSHOT_URL + f"{key}.json"))
+        for item in data["items"]:
+            item["published"] = datetime.fromisoformat(item["published"])
+        return {"items": data["items"], "last_success": data["last_success"]}
+    except Exception as e:
+        log.info("[%s] 前回の取得結果を読み込めませんでした (%r)", key, e)
+        return None
+
+
 def get_news(service_key):
     """指定したサービスのニュースを取得する(表示中のタブのぶんだけ取りに行く)。
 
@@ -524,6 +568,9 @@ def get_news(service_key):
     unique.sort(key=lambda i: i["published"], reverse=True)
     unique = unique[:MAX_ITEMS]
 
+    if not ok and not (cached and cached.get("items")):
+        # 1つも取得できず、手元に前回の内容もない(起動直後など): 公開中のサイトに保存してある前回分を探す
+        cached = load_snapshot(service_key)
     if ok:
         result = {"items": unique, "last_success": now, "stale": False}
     elif cached and cached.get("items"):
@@ -590,13 +637,41 @@ def render_page(current, tab_url):
                            last_success=utc(news["last_success"]), year=datetime.now().year)
 
 
-@app.route("/")
-def index():
-    # URLの ?tab=chatgpt などで表示するサービスを決める。指定がなければ Claude
-    current = request.args.get("tab", DEFAULT_SERVICE)
+def page_file(key):
+    """タブごとのページのファイル名。最初に開くタブ(Claude)は index.html にする。
+    (公開版・手元のサーバーとも、同じURL(/chatgpt.html など)で開けるようにする)"""
+    return "index.html" if key == DEFAULT_SERVICE else f"{key}.html"
+
+
+PAGE_KEYS = {page_file(k).removesuffix(".html"): k for k in SERVICES}
+
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def index(path):
+    # /chatgpt.html などのURL(古い形の ?tab=chatgpt も可)で表示するサービスを決める。指定がなければ Claude
+    name = path.rsplit("/", 1)[-1].removesuffix(".html")
+    if path.startswith("api/") or not name:
+        name = ""  # Vercel では /api/index に転送されてくる
+    current = request.args.get("tab") or PAGE_KEYS.get(name or "index")
+    if path and name and current is None:
+        return "ページが見つかりません", 404
     if current not in SERVICES:
         current = DEFAULT_SERVICE
-    return render_page(current, lambda key: f"/?tab={key}")
+    return render_page(current, page_file)
+
+
+@app.after_request
+def cache_headers(response):
+    """Vercel で動かすときは、取得結果を Vercel の配信網に数分だけ保存して使い回す
+    (見る人が多くても取得先に負担をかけず、表示も速くする)。取得失敗があったページは短めにする。"""
+    if os.environ.get("VERCEL") and response.status_code == 200:
+        has_problem = b'class="notice" role="alert">' in response.get_data()
+        cdn = "max-age=60, stale-while-revalidate=120" if has_problem else \
+            f"max-age={CACHE_SECONDS}, stale-while-revalidate=600"
+        response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+        response.headers["Vercel-CDN-Cache-Control"] = cdn
+    return response
 
 
 if __name__ == "__main__":
