@@ -206,6 +206,16 @@ UNRELIABLE_PUBLISHERS = re.compile(
     r"^(YouTube|X|note|Pasquale Pillitteri|BigGo ファイナンス|mbp-japan\.com|ホリエモンAI学校|OrcaRouter|"
     r"TIKR\.com|Yellow\.com)$"
     r"|Müdürlüğü|Belediyesi|Valiliği|Üniversitesi")
+# 掲載元のサイト(ドメイン)で除外するもの。名前は変わることがあるので、サイトの住所でも判定する
+#   hashout.jp(shiritomo): X(旧Twitter)で話題の投稿をもとに記事を量産するまとめ系サイト
+#   mezha.net / vietnam.vn / martincid.com / techflowpost.com / panewslab.com:
+#       海外サイトの記事を自動翻訳した日本語ページ(元の英語報道は専門メディアの取得先で拾える)
+#   ai-market.jp: 「〇〇とは？」の解説記事で、更新のたびに日付が新しくなり、ニュースの日付として正しくない
+UNRELIABLE_DOMAINS = ("hashout.jp", "mezha.net", "vietnam.vn", "martincid.com", "techflowpost.com",
+                      "panewslab.com", "ai-market.jp")
+# ニュースではない「〇〇とは？〜を解説」「〜する方法｜…」のような解説・使い方の記事。
+# 内容を更新するたびに日付だけが新しくなるため、ニュースの日付として正しくない(例: 古いモデルの解説が今日の日付で並ぶ)
+EVERGREEN_TITLE = re.compile(r"とは[？?].*(解説|紹介|違い|比較|まとめ)|方法[｜|]|徹底解説|(特徴|料金|使い方)[^。]*を解説")
 # ---------------------------------------------------------------------
 
 app = Flask(__name__)
@@ -424,11 +434,19 @@ def read_entries(feed):
     return entries
 
 
+def is_unreliable(publisher, site_url):
+    """Googleニュースの掲載元が、報道機関ではない(載せない)ものかどうか。名前とサイトの住所の両方で判定する。"""
+    if publisher and UNRELIABLE_PUBLISHERS.search(publisher.strip()):
+        return True
+    host = (urllib.parse.urlsplit(site_url or "").hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in UNRELIABLE_DOMAINS)
+
+
 def fetch_feed(feed, service):
     """1つのフィードを取得して、(表示用の辞書のリスト, 除外した件数) を返す。"""
     entries = read_entries(feed)
     kind = source_type(feed)
-    dropped = {"日付なし・不正": 0, "古い": 0, "無関係": 0, "信頼できない掲載元": 0, "リンク不正": 0}
+    dropped = {"日付なし・不正": 0, "古い": 0, "無関係": 0, "信頼できない掲載元": 0, "リンク不正": 0, "解説記事": 0}
     oldest = datetime.now(timezone.utc) - timedelta(days=MAX_AGE_DAYS)
     items = []
     for entry in entries:
@@ -448,12 +466,15 @@ def fetch_feed(feed, service):
             dropped["古い"] += 1
             continue
         publisher = (entry.get("source") or {}).get("title")
-        if publisher and UNRELIABLE_PUBLISHERS.search(publisher.strip()):
+        if is_unreliable(publisher, (entry.get("source") or {}).get("href")):
             dropped["信頼できない掲載元"] += 1
             continue
         core = core_title(title, publisher)
         text = clean_text(entry.get("summary", ""))
         if not feed.get("official"):
+            if EVERGREEN_TITLE.search(core):
+                dropped["解説記事"] += 1
+                continue
             haystack = core + " " + unicodedata.normalize("NFKC", text[:MATCH_TEXT_CHARS])
             excluded = service.get("exclude") and service["exclude"].search(haystack)
             matched = service["match"].search(core if feed.get("title_only") else haystack)

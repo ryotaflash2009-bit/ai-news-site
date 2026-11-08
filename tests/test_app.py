@@ -31,7 +31,10 @@ def rss(items):
     """偽のRSS。items は (タイトル, リンク, 日時, 概要, 掲載元) のリスト。"""
     body = ""
     for title, link, when, summary, publisher in items:
-        source = f"<source url='https://example.com'>{publisher}</source>" if publisher else ""
+        site = "https://example.com"
+        if isinstance(publisher, tuple):
+            publisher, site = publisher
+        source = f"<source url='{site}'>{publisher}</source>" if publisher else ""
         date = f"<pubDate>{format_datetime(when)}</pubDate>" if when else ""
         body += (f"<item><title>{title}</title><link>{link}</link>{date}"
                  f"<description>{summary}</description>{source}</item>")
@@ -141,12 +144,30 @@ class TestRelevance(TestCase):
         data = rss([("Claude spam", "https://e.com/1", ago(hours=1), "", "Kütahya İl Millî Eğitim Müdürlüğü"),
                     ("Claude blog", "https://e.com/2", ago(hours=1), "", "note"),
                     ("Claude script", "javascript:alert(1)", ago(hours=1), "", "ITmedia"),
+                    ("Claude buzz", "https://e.com/5", ago(hours=1), "", ("shiritomo", "https://hashout.jp")),
+                    ("Claude translated", "https://e.com/6", ago(hours=1), "", ("Vietnam.vn", "https://www.vietnam.vn")),
+                    ("Claude similar domain", "https://e.com/7", ago(hours=1), "", ("Foo", "https://nothashout.jp")),
                     ("Claude real news", "https://e.com/4", ago(hours=1), "", "ITmedia")])
         with mock.patch.object(app, "download", FakeNetwork({"feed.test": data})):
             items, dropped = app.fetch_feed(feed, app.SERVICES["claude"])
-        self.assertEqual([i["title"] for i in items], ["Claude real news"])
-        self.assertEqual(dropped["信頼できない掲載元"], 2)
+        self.assertEqual(sorted(i["title"] for i in items), ["Claude real news", "Claude similar domain"])
+        self.assertEqual(dropped["信頼できない掲載元"], 4)
         self.assertEqual(dropped["リンク不正"], 1)
+
+
+    def test_evergreen_explainers_are_dropped(self):
+        feed = {"name": "Googleニュース", "url": "https://feed.test/g", "limit": 50}
+        titles = ["Grok 4.5とは？性能・料金・使い方を解説 - AIsmiley",
+                  "Grokで画像編集する方法｜X・アプリ別の使い方 - AIsmiley",
+                  "Grok Imagineとは？特徴・料金まで徹底解説【2026年最新】 - AIsmiley",
+                  "Grokの新機能、気を付けるべきことは？ - ITmedia",
+                  "xAI、Grok 5を発表 料金は据え置き - ITmedia"]
+        data = rss([(t, "https://e.com/" + str(n), ago(hours=1), "", t.rsplit(" - ", 1)[1])
+                    for n, t in enumerate(titles)])
+        with mock.patch.object(app, "download", FakeNetwork({"feed.test": data})):
+            items, dropped = app.fetch_feed(feed, app.SERVICES["grok"])
+        self.assertEqual(sorted(i["title"] for i in items), sorted(titles[3:]))
+        self.assertEqual(dropped["解説記事"], 3)
 
 
 class TestDuplicates(TestCase):
