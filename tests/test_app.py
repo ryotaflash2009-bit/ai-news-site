@@ -380,15 +380,6 @@ class TestPages(TestCase):
         self.assertIn(f'<link rel="canonical" href="{app.SITE_URL}grok.html">', html)
         self.assertIn('<meta property="og:title" content="Grok ニュース | AI News Hub">', html)
 
-    def test_cdn_cache_headers_only_on_vercel(self):
-        # Vercel のビルド中は VERCEL が最初から設定されているので、ない状態をはっきり作って確かめる
-        without = {k: v for k, v in os.environ.items() if k != "VERCEL"}
-        with mock.patch.dict(os.environ, without, clear=True):
-            self.assertNotIn("Vercel-CDN-Cache-Control", self.client.get("/").headers)
-        with mock.patch.dict(os.environ, {"VERCEL": "1"}):
-            res = self.client.get("/gemini.html")
-        self.assertIn("max-age=300", res.headers["Vercel-CDN-Cache-Control"])
-
 
 if __name__ == "__main__":
     unittest.main()

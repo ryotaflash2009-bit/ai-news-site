@@ -198,9 +198,10 @@ RETRY_SECONDS = 60         # 取得に失敗した取得先があったときは
 TIMEOUT_SECONDS = 10
 USER_AGENT = "Mozilla/5.0 (ai-news-site; RSS reader)"
 # サイトの正式なURL(人に教える・検索エンジンに伝えるURL)
-SITE_URL = "https://ai-news-hub-app.vercel.app/"
+# (Vercel 版は無料枠の上限で 11/09 から止められているため、動いている GitHub Pages 版を正式なURLにしている)
+SITE_URL = "https://ryotaflash2009-bit.github.io/ai-news-site/"
 # 前回の取得結果(data/タブ名.json)を読みに行く場所(公開中のサイト)。環境変数 NEWS_SNAPSHOT_URL で変えられる
-SNAPSHOT_URL = os.environ.get("NEWS_SNAPSHOT_URL", "https://ai-news-hub-app.vercel.app/data/")
+SNAPSHOT_URL = os.environ.get("NEWS_SNAPSHOT_URL", SITE_URL + "data/")
 # 取得先ごとの優先度(重複した記事はこの順で残す): 公式 > 専門メディア > Googleニュース
 SOURCE_PRIORITY = {"official": 0, "media": 1, "google": 2}
 # Googleニュースに混ざる、報道機関ではない掲載元(個人ブログ・SNS・動画・自動生成の記事まとめ・宣伝ページ、
@@ -693,36 +694,21 @@ PAGE_KEYS = {page_file(k).removesuffix(".html"): k for k in SERVICES}
 
 
 def canonical_url(key):
-    """タブの正式なURL(Vercel 版)。最初のタブはサイトのトップ(/)にする。"""
+    """タブの正式なURL。最初のタブはサイトのトップにする。"""
     return SITE_URL if key == DEFAULT_SERVICE else SITE_URL + page_file(key)
 
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def index(path):
-    # /chatgpt.html などのURL(古い形の ?tab=chatgpt も可)で表示するサービスを決める。指定がなければ Claude
+    # 手元で試すとき用。/chatgpt.html などのURL(古い形の ?tab=chatgpt も可)で表示するサービスを決める。指定がなければ Claude
     name = path.rsplit("/", 1)[-1].removesuffix(".html")
-    if path.startswith("api/") or not name:
-        name = ""  # Vercel では /api/index に転送されてくる
     current = request.args.get("tab") or PAGE_KEYS.get(name or "index")
     if path and name and current is None:
         return "ページが見つかりません", 404
     if current not in SERVICES:
         current = DEFAULT_SERVICE
     return render_page(current, page_file)
-
-
-@app.after_request
-def cache_headers(response):
-    """Vercel で動かすときは、取得結果を Vercel の配信網に数分だけ保存して使い回す
-    (見る人が多くても取得先に負担をかけず、表示も速くする)。取得失敗があったページは短めにする。"""
-    if os.environ.get("VERCEL") and response.status_code == 200:
-        has_problem = b'class="notice" role="alert">' in response.get_data()
-        cdn = "max-age=60, stale-while-revalidate=120" if has_problem else \
-            f"max-age={CACHE_SECONDS}, stale-while-revalidate=600"
-        response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
-        response.headers["Vercel-CDN-Cache-Control"] = cdn
-    return response
 
 
 if __name__ == "__main__":

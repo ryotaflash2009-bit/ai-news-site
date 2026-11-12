@@ -4,8 +4,8 @@
 GitHub Pages 版では、GitHub Actions がこのスクリプトを定期的に実行し、
 できた dist フォルダを公開する。見る人は保存済みのページを読むだけなので速く安定する。
 
-Vercel 版では、ページは見られたときにその場で作る(api/index.py)。ここでは、取得がすべて失敗したときの
-予備として使う「前回の取得結果」(data/タブ名.json)だけを作る。
+Vercel 版も同じように、ビルドのときに作ったページをそのまま配る(見られたときに計算しないので、無料枠の
+計算時間を使わない)。GitHub Actions が定期実行のたびに Vercel の作り直しを依頼する。
 
 あるタブの取得先がすべて失敗したときは、公開中のサイトに保存してある前回の取得結果を読み込み、
 「最後に取得できた時点の内容で、最新ではない」ことを画面に出す(app.get_news を参照)。
@@ -14,7 +14,6 @@ Vercel 版では、ページは見られたときにその場で作る(api/index
 """
 
 import json
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -23,8 +22,6 @@ import app
 from app import SERVICES, get_news, page_file, render_page
 
 DIST = Path(__file__).parent / "dist"
-# Vercel のビルド中は環境変数 VERCEL が "1" になる。そのときはページを作らず、予備のデータだけを作る
-ON_VERCEL = bool(os.environ.get("VERCEL"))
 
 
 def save_snapshot(key, news):
@@ -35,7 +32,7 @@ def save_snapshot(key, news):
 
 
 def write_sitemap():
-    """検索エンジン向けに、正式なURL(Vercel 版)のページ一覧(sitemap.xml)と robots.txt を作る。"""
+    """検索エンジン向けに、正式なURLのページ一覧(sitemap.xml)と robots.txt を作る。"""
     urls = "".join(f"<url><loc>{app.canonical_url(key)}</loc><changefreq>hourly</changefreq></url>"
                    for key in SERVICES)
     (DIST / "sitemap.xml").write_text(
@@ -61,8 +58,7 @@ def main():
                 print(f"[警告] {key}: 取得先がすべて失敗。前回 ({when}) の内容 {len(news['items'])}件を「最新ではない」と表示")
             else:
                 fresh += 1
-            if not ON_VERCEL:
-                (DIST / page_file(key)).write_text(render_page(key, page_file), encoding="utf-8")
+            (DIST / page_file(key)).write_text(render_page(key, page_file), encoding="utf-8")
             save_snapshot(key, news)
             print(f"{page_file(key)}: {len(news['items'])}件")
 
