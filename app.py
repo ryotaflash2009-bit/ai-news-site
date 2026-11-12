@@ -177,7 +177,10 @@ SERVICES = {
              "title_only": True},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/microsoft-copilot/feed/", "limit": 20},
             {"name": "TechCrunch", "url": "https://techcrunch.com/tag/copilot/feed/", "limit": 20},
-            {"name": "The Verge", "url": "https://www.theverge.com/rss/microsoft/index.xml", "limit": 20},
+            # Microsoft 全般のタグなので、概要に「Copilot+ PC」(パソコンの名前)が出るだけの Xbox などの記事が混ざる。
+            # タイトルに Copilot があるものだけにする
+            {"name": "The Verge", "url": "https://www.theverge.com/rss/microsoft/index.xml", "limit": 20,
+             "title_only": True},
             *AI_MEDIA,
             {"name": "Googleニュース", "url": google_news('"Copilot" Microsoft'), "limit": 30},
         ],
@@ -211,11 +214,18 @@ UNRELIABLE_PUBLISHERS = re.compile(
 #   mezha.net / vietnam.vn / martincid.com / techflowpost.com / panewslab.com:
 #       海外サイトの記事を自動翻訳した日本語ページ(元の英語報道は専門メディアの取得先で拾える)
 #   ai-market.jp: 「〇〇とは？」の解説記事で、更新のたびに日付が新しくなり、ニュースの日付として正しくない
+#   laodong.vn: 海外サイトの自動翻訳(上と同じ)
+#   moomoo.com: 投資アプリの利用者投稿(「ねえ @grok、…」のような個人の書き込み)
+#   t.co: X(旧Twitter)の投稿へのリンク
 UNRELIABLE_DOMAINS = ("hashout.jp", "mezha.net", "vietnam.vn", "martincid.com", "techflowpost.com",
-                      "panewslab.com", "ai-market.jp")
+                      "panewslab.com", "ai-market.jp", "laodong.vn", "moomoo.com", "t.co")
 # ニュースではない「〇〇とは？〜を解説」「〜する方法｜…」のような解説・使い方の記事。
 # 内容を更新するたびに日付だけが新しくなるため、ニュースの日付として正しくない(例: 古いモデルの解説が今日の日付で並ぶ)
-EVERGREEN_TITLE = re.compile(r"とは[？?].*(解説|紹介|違い|比較|まとめ)|方法[｜|]|徹底解説|(特徴|料金|使い方)[^。]*を解説")
+EVERGREEN_TITLE = re.compile(r"とは[？?].*(解説|紹介|違い|比較|まとめ)|方法[｜|]|徹底解説|(特徴|料金|使い方)[^。]*を解説"
+                             r"|[？?][^？?]*(違い|設定|対策|方法|使い方|料金|ステップ)[^？?]*を解説")
+# ニュースではない、セミナー・勉強会などの宣伝(参加者の募集)
+EVENT_AD_TITLE = re.compile(r"(ウェビナー|セミナー|勉強会|講座|説明会|ハンズオン|ワークショップ)[^。]*"
+                            r"(開催|参加無料|無料招待|申込|受付|募集)|(開催|参加無料)[^。]*(ウェビナー|セミナー|勉強会|講座)")
 # ---------------------------------------------------------------------
 
 app = Flask(__name__)
@@ -446,11 +456,12 @@ def fetch_feed(feed, service):
     """1つのフィードを取得して、(表示用の辞書のリスト, 除外した件数) を返す。"""
     entries = read_entries(feed)
     kind = source_type(feed)
-    dropped = {"日付なし・不正": 0, "古い": 0, "無関係": 0, "信頼できない掲載元": 0, "リンク不正": 0, "解説記事": 0}
+    dropped = {"日付なし・不正": 0, "古い": 0, "無関係": 0, "信頼できない掲載元": 0, "リンク不正": 0, "解説記事": 0, "宣伝・催し": 0}
     oldest = datetime.now(timezone.utc) - timedelta(days=MAX_AGE_DAYS)
     items = []
     for entry in entries:
-        title = html.unescape(entry.get("title", "")).strip()
+        # タイトル途中の改行は空白1つにする(全角の空白など、記事の書式はそのまま残す)
+        title = re.sub(r"\s*[\r\n]+\s*", " ", html.unescape(entry.get("title", ""))).strip()
         link = entry.get("link", "").strip()
         if not title or not link:
             continue
@@ -474,6 +485,9 @@ def fetch_feed(feed, service):
         if not feed.get("official"):
             if EVERGREEN_TITLE.search(core):
                 dropped["解説記事"] += 1
+                continue
+            if EVENT_AD_TITLE.search(core):
+                dropped["宣伝・催し"] += 1
                 continue
             haystack = core + " " + unicodedata.normalize("NFKC", text[:MATCH_TEXT_CHARS])
             excluded = service.get("exclude") and service["exclude"].search(haystack)

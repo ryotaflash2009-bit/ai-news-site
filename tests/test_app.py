@@ -169,6 +169,28 @@ class TestRelevance(TestCase):
         self.assertEqual(sorted(i["title"] for i in items), sorted(titles[3:]))
         self.assertEqual(dropped["解説記事"], 3)
 
+    def test_more_explainers_event_ads_and_posts_are_dropped(self):
+        feed = {"name": "Googleニュース", "url": "https://feed.test/g", "limit": 50}
+        rows = [("Grokは無料でどこまで使える？有料プランや他AIとの違いを解説", "AIsmiley"),
+                ("Copilot活用講座、第1回無料招待枠を1,500名に拡大", "PR TIMES"),
+                ("Copilotを比べる無料ウェブセミナーを11月12日に開催", "ニコニコニュース"),
+                ("ねえ @grok、ビットコインは上がる？", ("Moomoo", "https://www.moomoo.com")),
+                ("Grok搭載エージェント、通信攻撃で対策ソフトを回避", ("Howl.Link", "https://t.co")),
+                ("「Grok 5」の用途は？ モデルの選び方、xAIが基本を解説", "ITmedia"),
+                ("xAI、Grok開発者向け勉強会の内容を公開", "ITmedia")]
+        data = rss([(t, "https://e.com/%d" % n, ago(hours=1), "", p) for n, (t, p) in enumerate(rows)])
+        with mock.patch.object(app, "download", FakeNetwork({"feed.test": data})):
+            items, dropped = app.fetch_feed(feed, app.SERVICES["grok"])
+        self.assertEqual(sorted(i["title"] for i in items), sorted(t for t, _ in rows[5:]))
+        self.assertEqual((dropped["解説記事"], dropped["宣伝・催し"], dropped["信頼できない掲載元"]), (1, 2, 2))
+
+    def test_line_breaks_in_titles_become_spaces(self):
+        feed = {"name": "ITmedia AI+", "url": "https://feed.test/i", "limit": 50}
+        data = rss([("xAI、Grok 5を公開\n　料金は据え置き", "https://e.com/1", ago(hours=1), "", None)])
+        with mock.patch.object(app, "download", FakeNetwork({"feed.test": data})):
+            items, _ = app.fetch_feed(feed, app.SERVICES["grok"])
+        self.assertEqual(items[0]["title"], "xAI、Grok 5を公開 料金は据え置き")
+
 
 class TestDuplicates(TestCase):
     def test_publisher_suffix_versions_are_merged(self):
