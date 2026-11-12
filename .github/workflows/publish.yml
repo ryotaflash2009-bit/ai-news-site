@@ -1,5 +1,7 @@
 # ニュースを定期的に取得して、GitHub Pages に公開する
-# - 30分ごと(毎時17分と47分)に自動実行
+# - 約30分ごとに自動実行。GitHub の定期実行(schedule)は混雑で数時間あくことがあるため、
+#   公開が終わったら約27分待って次の実行を自分で予約する(「次の実行を予約」の段)。
+#   定期実行は、この予約が途切れたときに再開させる役目
 # - コードを更新(push)したときにも実行
 # - GitHub の Actions 画面から手動でも実行できる(Run workflow ボタン)
 name: Update news and publish
@@ -15,14 +17,15 @@ permissions:
   contents: write   # 長期間放置で定期実行が止まらないようにするための空コミット用
   pages: write
   id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
+  actions: write    # 次の実行を予約するため
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 公開の作業は同時に1つだけ(待っている間の「次の実行を予約」はこの対象外)
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -64,6 +67,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -78,9 +84,34 @@ jobs:
         env:
           VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
         run: |
-          if [ -n "$VERCEL_DEPLOY_HOOK" ]; then
+          # Vercel の無料プランは1日の公開回数に上限があるので、依頼は約2時間に1回にする
+          if [ $(( $(date +%s) / 1800 % 4 )) -ne 0 ]; then
+            echo "Vercel の再公開は約2時間に1回のため、今回はスキップします"
+          elif [ -n "$VERCEL_DEPLOY_HOOK" ]; then
             curl -fsS -X POST "$VERCEL_DEPLOY_HOOK" > /dev/null
             echo "Vercel の再公開を依頼しました"
           else
             echo "VERCEL_DEPLOY_HOOK が未登録のため、Vercel の再公開はスキップします"
+          fi
+
+  # 約27分待ってから、次の実行を予約する(GitHub の定期実行の遅れに頼らず、約30分ごとに更新するため)。
+  # すでに別の実行が動いている・待っているときは予約しない(実行が二重・三重に増えないようにする)。
+  # 公開リポジトリなので、GitHub Actions の利用は無料
+  schedule-next:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait about 27 minutes
+        run: sleep 1620
+      - name: Start the next run unless another one is already running
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          others=$(gh run list --workflow publish.yml --limit 20 --json databaseId,status             --jq "[.[] | select(.databaseId != ${{ github.run_id }}) | select(.status != \"completed\")] | length")
+          if [ "$others" -gt 0 ]; then
+            echo "ほかの実行(${others}件)が動いているため、次の実行は予約しません"
+          else
+            gh workflow run publish.yml --ref main
+            echo "次の実行を予約しました"
           fi
